@@ -1,0 +1,867 @@
+---
+title: "ANOVA and STAR: Measuring the Effect of Class Size on Academic Performance"
+author: "Wade Klein"
+date: "03/07/2024"
+output:
+  html_document:
+    theme: flatly
+    df_print: paged
+    number_sections: yes
+---
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H')
+```
+
+```{css, echo = FALSE}
+caption {
+      color: black;
+      font-weight: bold;
+      font-size: 1.0em;
+    }
+```
+
+
+# Abstract
+
+The STAR dataset is widely known for its scale and rigorousness, with the results often cited as evidence of the positive effect of small class sizes. This report aims to identify the relationship between the treatment variable of class size and the outcome variable of scaled 1st grade math scores, with additional consideration for the heterogeneous factors associated with individual schools. A two-way ANOVA design using these two fixed effects to estimate the mean math scores of class size is scrutinized for any potential methodological gaps and reinforced via extensive sensitivity analysis. Further investigation explores alternative metrics of academic performance and potential confounding effects of inter-socialization of students. Ultimately, the benefit of class size reduction is found to be supported by the STAR data with few caveats limiting the experiment's robustness.
+
+
+# Introduction
+
+The Tennessee Student Teacher Achievement Ratio (STAR) was a groundbreaking study in the 1980s due to its thoroughness and enormous scale. The experiment gathered longitudinal data on thousands of students, measuring their test outcomes over the course of their time in grade school. After random assignment to one of three class sizes and types, STAR tracked students' performance from Kindergarten to 3rd grade with particular attention directed towards the causal link between class size reduction and academic performance--consequently establishing substantial evidence for the benefits of small class sizes. STAR was a landmark study for both its robustness of design and generalizability for tangible and immediate school policy recommendations.
+
+Despite its widespread acceptance, the methodology of STAR is occasionally criticized for issues of noncompliance due to students dropping from the program over the course of the program and inadequate record-keeping of the initial randomization process. Some have also raised the objection that the measurable benefit of smaller class sizes may be exclusive to early education (Schanzenbach 2006).
+
+The primary question of interest for this analysis is: Are there any differences in math scaled scores in 1st grade across class types? 
+The secondary question of interest is: Which class type is associated with the highest math scaled scores in 1st grade?
+
+With these questions as a focal point, this study aims to identify the extent to which the experimental STAR program can be statistically substantiated. Particular attention will be given to the magnitude of the effect of the potential benefit of smaller class sizes and whether alternative measures can explain the variability in 1st grade scaled math scores of students--namely, potential flaws in experimental design and student sociability metrics.
+
+
+# Background 
+
+
+The longitudinal, student-level data of the Tennessee Student Teacher Achievement Ratio were gathered over four years, from 1985 until 1989. While the majority of the variables pertain to demographic and academic performance metrics over this span, additional data were collected on the students' performance in middle school and beyond. Among the 379 variables describing these 11601 students are the demographic characteristics and assignment groups relating to their teachers, schools, and treatment groups. 
+
+Students were randomly assigned to one of three treatment groups of class type when they joined the study: 
+
+1. "Small" class type, characterized by 15-17 students under a single instructor.
+2. "Regular" class type, characterized by 22-25 students under a single instructor.
+3. "Regular + Aide" class type, characterized by 22-25 students under a primary instructor and a full-time aide.
+
+In addition to the random assignment of students, teachers were randomly assigned to each treatment group (class type). All schools in Tennessee were invited to participate in STAR, with careful scrutiny given to ensure that all necessary criteria were met:
+
+1. Each school was required to be sufficiently large to accommodate at least one class of each type.
+2. No student could receive fewer services than they would have otherwise in order to fulfill the experimental design.
+3. Investigators followed procedures for confidentiality and human research standards.
+4. Outside consultants performed all statistical analysis using standardized tests (specifically, the Stanford Achievement Test, established in 1983).
+
+Ultimately, 79 schools participated and roughly 7000 students were enrolled in STAR each year. These school IDs--along with the treatment group of class type and the outcome variable of scaled math score--comprise the primary variables of interest for the following analysis.
+
+
+# Descriptive analysis 
+
+```{r, echo=F,warning=F,error=F,message=F}
+library(foreign)
+library(MASS)
+library(tidyverse)
+library(splines)
+library(knitr)
+library(car)
+library(scales)
+library(lme4)
+library(kableExtra)
+library(scales)
+library(gridExtra)
+library(cowplot)
+
+STAR_raw <- read.spss("STAR_Students.sav", use.value.labels = TRUE, to.data.frame = T)
+
+STAR_raw_no_NA <- STAR_raw %>% filter(!is.na(g1tmathss) & !is.na(g1classtype) & !is.na(g1schid))
+
+STAR_raw_only_NA <- STAR_raw %>% filter(is.na(g1tmathss) & is.na(g1classtype) & is.na(g1schid))
+
+sum(is.na(STAR_raw$g1tmathss))
+sum(is.na(STAR_raw$g1classtype))
+sum(is.na(STAR_raw$g1schid))
+           
+STAR_df <- STAR_raw %>%
+  select(starts_with("gk") | starts_with("g1") |
+           c(g8pmanoy,stdntid,gender,race,
+             FLAGSGK,FLAGSG1,FLAGSG2,FLAGSG3,cmpstype,
+             cmpsdura,yearsstar,yearssmall,)) %>%
+  filter_all(any_vars(!is.na(.))) 
+```
+
+The STAR dataset provided from the Harvard data base contains 11601 rows corresponding to longitudinal observations of all students involved in the STAR experiment. As this analysis primarily concerns the 1st grade scores, the bulk of the exploratory data analysis focuses on the associated variables of interest for 1st grade students--namely their class type, school ID, and scaled math scores.
+
+First, the data are considered for completeness. After filtering for NA values corresponding to missing measurements of the three primary variables of interest, only ~6600 rows remain. Due to interest in the causal link between class type and 1st grade, this incompleteness is primarily of concern if a substantial number of students drop from the STAR program after their initial assignment and patterns are present between the number of students exiting and their initial class type assignment--in which case the randomization assumptions grounding extrapolation to average causal effects may be lost. Thus, this discrepancy warrants some exploration of the ITT and ACE framework via an explicit comparison of mean dropout rates between the different groups of the treatment variable, class type. 
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=3}
+
+STAR_drop1 <- STAR_raw %>%
+  mutate(g1drop = ((FLAGSGK=="YES") - (FLAGSG1=="NO")==1)) %>%
+  group_by(gktchid,gkschid,gkclasstype) %>%
+  summarize(dropratio = sum(g1drop==1) / n()) %>%
+  na.omit()
+
+STAR_drop1_classtype <- STAR_drop1 %>% group_by(gkclasstype) %>% 
+  summarize(dropratio = mean(dropratio),na.rm=T)
+
+class_drop_plot <- ggplot(STAR_drop1, aes(gkclasstype, dropratio)) +
+  geom_violin(aes(fill = gkclasstype)) +
+  geom_point(data=STAR_drop1_classtype, aes(gkclasstype, dropratio),color="black") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(fill = "Class Type") +
+  xlab("Class Type") + 
+  ylab("Drop Ratio") + 
+  labs(title = str_wrap("Ratio of Students Dropping from Star \n in Grade 1, by Class Type", 40))+
+  theme(legend.position = "none")
+
+teacher_drop_plot <- ggplot(STAR_drop1) +
+  geom_line(aes(reorder(gktchid, dropratio), dropratio)) +
+  geom_point(aes(reorder(gktchid, dropratio), dropratio)) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  xlab("Teacher") + 
+  ylab("Drop Ratio") + 
+  labs(title = str_wrap("Ratio of Students Dropping from Star \n in Grade 1, by Teacher", 40))+
+  theme(legend.position = "none")
+plot_grid(class_drop_plot, teacher_drop_plot, rel_heights = c(1/4, 1/4), axis = "t")
+
+STAR_drop1_pie <- STAR_raw %>%
+  mutate(g1drop = ((FLAGSGK=="YES") - (FLAGSG1=="NO")==1)) %>%
+  group_by(gkclasstype) %>%
+  summarize(dropratio = sum(g1drop==1) / n()) %>%
+  mutate(Drop = 100 * dropratio, Stay = 100 * (1-dropratio)) %>%
+  pivot_longer(c(Drop, Stay), names_to = "Status") %>%
+  na.omit()
+
+
+ggplot(STAR_drop1_pie, aes(x="", y=value, fill= Status)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start=0) +
+  theme(axis.text.x=element_blank()) +
+  geom_text(aes(y = value, label = percent(value/100, accuracy = 1)),
+            position = position_stack(vjust=.5)) +
+  theme(axis.text.x=element_blank()) +
+  theme_void() +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_grid(~gkclasstype) +
+  ggtitle("Students Exiting STAR")
+# grid.arrange(class_drop_plot, teacher_drop_plot,ncol=2)
+# model_drop <- aov(dropratio ~ gkclasstype, data=STAR_drop1)
+# model_drop_summary <- summary(model_drop)[[1]]
+# rownames(model_drop_summary) <- c("Class Type", "Residuals")
+# kable(model_drop_summary)
+```
+
+Of the 5000 NA values present across these variables, 4500 of the missing rows reflect students who dropped from the program after their kindergarten year. Where this gap may suggest some level of noncompliance, comparison of the number of students dropping across classrooms between different treatment groups of class size reveals that the ratio of students dropping appears to be similarly distributed across the treatment groups. Additionally, under the STAR experimental design, test scores were collected in the spring of each year, and students were included in the dataset if they were enrolled in a particular class as early as October. Thus, even if a student were shifted between groups or joined the program after the first year, they would still have ample time in their given class size group to be exposed to the causal effects. Lastly, the greatest level of program-dropouts belongs to the regular and regular+aide class types, which suggests that if anything, smaller class sizes reduce the likelihood of dropouts. If--as was found in the previous initial analysis--the smaller class sizes are shown to produce a positive result via increased test scores, then these differences can be assumed to be along the causal pathway, rather than an unmeasured confounding effect. 
+
+
+
+Next, variables containing measurements of student characteristics such as gender, race, etc. are considered for the purpose of exploring the distribution of the 1st grade students.
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+par(mfrow = c(1, 3), mar = c(0.5,1,1,1))
+pie(table(STAR_df$gender), main = "Student Gender")
+levels(STAR_df$race) <- c("WHITE", "BLACK", "OTHER", "OTHER", "OTHER", "OTHER", "OTHER")
+pie(table(STAR_df$race), main = "Student Race")
+pie(table(STAR_df$g1surban), main = "Student Urbanicity")
+par(mfrow = c(1, 2), mar = c(2,5,2,3))
+pie(table(STAR_df$g1classtype), main = "Student Class Type")
+hist(STAR_df$g1tmathss, main = "Student Scaled Math Scores", col = "lightblue")
+  
+#   ggplot(STAR_df, aes(x="", y=gender) +
+#   geom_bar(width = 1, stat = "identity") +
+#   coord_polar("y", start=0) +
+#   theme(axis.text.x=element_blank()) +
+#   geom_text(aes(y = value, label = percent(value/100, accuracy = 1)),
+#             position = position_stack(vjust=.5)) +
+#   theme(axis.text.x=element_blank()) +
+#   theme_void() +
+#   scale_fill_brewer(palette = "Dark2") +
+#   facet_grid(~g1classtype) +
+#   ggtitle("School Urbanicity")
+#   
+#   
+# plot_grid(class_drop_plot, teacher_drop_plot, rel_heights = c(1/4, 1/4), axis = "t")  
+#   
+# STAR_df %>%
+#   select(starts_with("gk") | starts_with("g1") |
+#            c(g8pmanoy,stdntid,gender,race,
+#              FLAGSGK,FLAGSG1,FLAGSG2,FLAGSG3,cmpstype,
+#              cmpsdura,yearsstar,yearssmall,)) %>%
+#   filter_all(any_vars(!is.na(.)))
+```
+
+It appears that white, male, and rural are respectively the most common demographic features of gender, race, and urbanicity. The intended treatment variable--class type--does appear to be roughly divided into thirds by number of students, and the student scaled math scores appear roughly normal with a slight positive skew.
+
+Next, characteristics of teachers are explored. Math scores will be aggregated by classroom via the mean scaled math score of the students for each teacher.
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+STAR_df_teacher <- STAR_df %>%
+  select(g1classtype, g1tchid, g1tcareer, g1tgen, g1trace, g1thighdegree, g1tyears) %>%
+  distinct()
+
+STAR <- STAR_df %>% 
+  filter(!is.na(g1classtype)) %>%
+  mutate(g1schid = as.factor(g1schid)) %>%
+  group_by(g1tchid,g1classtype,g1schid,g1surban) %>%
+  summarize(math_mean_byteacher = mean(g1tmathss,na.rm=T),
+            math_med_byteacher = median(g1tmathss,na.rm=T),
+            math_10_byteacher = quantile(g1tmathss,.1,na.rm=T),
+            math_90_byteacher = quantile(g1tmathss,.9,na.rm=T),
+            has_disruptor = sum(g8pmanoy=="ALWAYS",na.rm=T) > 0,
+            mean_disruption = mean(as.numeric(g8pmanoy),na.rm=T),
+            mean_scamin = mean(as.numeric(g1selfconcraw), na.rm = T),
+            imp_scamin = mean(as.numeric(g1selfconcraw) - as.numeric(gkselfconcraw), na.rm = T))
+
+par(mfrow = c(2, 3), mar = c(0.5,1,1,3.5))
+pie(table(STAR_df_teacher$g1tgen), main = "Teacher Gender", col = c("white", "lavender", "lightpink", "cornsilk", "lightgreen", "lightcyan"))
+levels(STAR_df_teacher$g1trace) <- c("WHITE", "BLACK", "OTHER", "OTHER", "OTHER", "OTHER")
+pie(table(STAR_df_teacher$g1trace), main = "Teacher Race", col = c("white", "lavender", "lightpink", "cornsilk", "lightgreen", "lightcyan"))
+pie(table(STAR_df_teacher$g1tcareer), main = "Teacher Career", col = c("white", "lavender", "lightpink", "cornsilk", "lightgreen", "lightcyan"))
+levels(STAR_df_teacher$g1thighdegree) <- c("OTHER", "BACHELORS", "MASTERS", "OTHER", "OTHER", "OTHER")
+pie(table(STAR_df_teacher$g1thighdegree), main = "Teacher Highest Degree", col = c("white", "lavender", "lightpink", "cornsilk", "lightgreen", "lightcyan"))
+hist(STAR_df_teacher$g1tyears, main = "Teacher Years", breaks = 12, col = "lavender")
+par(mfrow = c(1, 2), mar = c(2,5,2,3))
+pie(table(STAR_df_teacher$g1classtype), main = "Teacher Class Type", col = c("white", "lavender", "lightpink", "cornsilk", "lightgreen", "lightcyan"))
+hist(STAR$math_mean_byteacher, main = "Mean Scaled Math Scores", breaks = 12, col = "lavender")
+```
+
+Notably, nearly all teachers are female. A majority of teachers are white and have a bachelors as their respective ethnicity and highest degree attained. Teacher experience and career level suggest that most teachers are relatively inexperienced with a general decrease in number as experience increases.
+
+Again, class type appears to be roughly divided into thirds by teacher, and the mean scaled math scores follow an approximately normal distribution. Analysis was also given to other measures of central tendency such as median or other quantiles, as given in the sensitivity analysis. 
+
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=3}
+ggplot(filter(STAR_df, !is.na(g1classtype))) +
+  geom_histogram(aes(g1tmathss), fill = "lightblue") +
+  facet_wrap(~g1classtype) +
+  xlab("Math Scaled Scores") +
+  ylab("Count") +
+  theme_minimal()
+```
+
+Since the data for each class sizes and school type do not demonstrate a significant skewness within each cell, it follows that mean and median should produce relatively similar results when conducting our comparison. For the following analysis (unless otherwise specified), mean scaled math scores by teacher will be the outcome variable of interest.
+
+
+Lastly, mean scaled math scores between treatment groups and schools are presented. 
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=3}
+STAR_school <- STAR %>% 
+  mutate(g1schid = as.factor(g1schid)) %>%
+  group_by(g1schid) %>%
+  summarize(math_mean_byschool = mean(math_mean_byteacher, na.rm = T))
+
+STAR_full_withschool <- STAR %>% 
+  mutate(g1schid = as.factor(g1schid)) %>%
+  left_join(STAR_school,by = "g1schid")
+
+school_mean_plot <- ggplot() +
+  geom_violin(data=STAR_full_withschool, aes(reorder(g1schid,math_mean_byschool),
+                                             math_mean_byteacher, fill = g1schid)) +
+  geom_point(data=STAR_full_withschool, aes(reorder(g1schid, math_mean_byschool), math_mean_byschool)) +
+  theme_minimal()  +
+  scale_fill_brewer(palette = "Dark2") + 
+  ylab("Mean Math Scores") +
+  xlab("School") +
+  theme(axis.text.x = element_blank(), legend.position = "none")
+
+STAR_classtype <- STAR %>% 
+  group_by(g1classtype) %>%
+  summarize(mathmean_byclasstype = mean(math_mean_byteacher, na.rm = T))
+
+classtype_mean_plot <- ggplot() +
+  geom_violin(data=STAR, aes(g1classtype, math_mean_byteacher, fill = g1classtype)) +
+  geom_point(data=STAR_classtype, aes(g1classtype, mathmean_byclasstype)) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2") +
+  ylab("Mean Math Scores") +
+  xlab("Class Type") +
+  theme(legend.position = "none")
+
+plot_grid(school_mean_plot, classtype_mean_plot, rel_heights = c(1/4, 1/4), axis = "t")
+```
+
+From plotting mean math score against school ID and class type, it appears that there is significant variation between the distributions of each of these variables.
+ 
+
+# Inferential analysis 
+
+## Exploration of Potential Interaction
+
+Based on the experimental design and exploratory analysis, it appears feasible that school ID and class type could be significant predictors of mean scaled math score. Additionally, it is reasonable to believe that the interaction between school ID and class type could potentially be significant, as different schools may be experience different effects on test score based on their specific characteristics. For example, schools employing teachers with less experience may be worse at managing larger classes relative to schools employing teachers with more years of experience, or perhaps rural schools benefit more from the larger class sizes as compared to urban schools due to a greater familiarity within the rural community. 
+
+Following this reasoning, the following two-way ANOVA model is selected: 
+
+$$Y_{ijk} =  \mu_{ijk}+\epsilon_{ijk}= \mu_{\cdot\cdot} + \alpha_i+\beta_j + (\alpha\beta)_{ij}+\epsilon_{ijk}, \ k=1,\ldots, n_{ij}, j=1, \ldots, b, i=1,\ldots, a$$
+
+Here, the index $i$ represents the class type: small ($i=1$), regular ($i=2$), regular with aide ($i=3$), 
+
+the index $j$ represents the school indicator, and the index $k$ indicates a given teacher within an $i$ class type and $j$ school, 
+
+the $Y_{ijk}$ outcome variable and $\epsilon_{ijk}$ error term are the mean scaled math score and model error for a given 1st grade teacher,
+
+the $\mu_{..}$ variable is the (balanced) mean across all teachers (i.e. the arithmetic average of all 1st grade teachers' mean scaled math scores), and 
+
+the $\alpha$ and $\beta$ coefficients reflect the effect of being in a class type $i$ or a school with id $k$ respectively. 
+
+Also, the $(\alpha\beta)_{ij}$ coefficient represents the interaction coefficient on the $i$ class group and $j$ school.
+
+
+This model assumes \(\epsilon_{ijk}\stackrel{i.i.d.}{\sim}{N(0,\sigma^2)}\).
+
+Further assumptions dictate that the randomization was carried out properly and the sample size is sufficiently large, allowing the independent variables of class size and school to be the only factors affecting the scaled math scores. Also note that R assumes equal weights for the different cells under two-way ANOVA. This model uses the following definitions: $$\mu_{\cdot \cdot} =\sum_{i=1}^a \sum_{j=1}^ b \mu_{ij}/(ab), \ \mu_{i\cdot} = \sum_{j=1}^b \mu_{ij} /b, \ \mu_{\cdot j}=\sum_{i=1}^a \mu_{ij}/a. $$ and $$\alpha_i=\mu_{i\cdot} - \mu_{\cdot \cdot},\ \beta_j=\mu_{\cdot j}-\mu_{\cdot\cdot},(\alpha\beta)_{ij} =\mu_{ij}-\mu_{i\cdot}-\mu_{\cdot j}+\mu_{\cdot\cdot}.$$ resulting in the constraints $$\sum_i \alpha_i = \sum_j \beta_j=0$$
+
+
+$$\sum_{i=1}^a (\alpha\beta)_{ij} =0, \forall j
+\sum_{j=1}^b (\alpha\beta)_{ij} =0, \forall i$$ 
+
+
+Here, an F test to determine whether the interaction term is significant. 
+
+The null and alternative hypotheses for this F test are: $H_0: (\alpha\beta)_{ij}=0 \ {\rm v.s.} \ H_1: {\rm not \ all \ } (\alpha\beta)_{ij} \ {\rm are \ zero}$.
+
+To test, a full model $Y_{ijk} =\mu_{\cdot\cdot} + \alpha_i+\beta_j + (\alpha\beta)_{ij}+\epsilon_{ijk}$ and reduced model $Y_{ijk} =\mu_{\cdot\cdot} + \alpha_i+\beta_j +\epsilon_{ijk}$ are established.
+
+The F-statistic is: $$F^*=\frac{ [{\rm SSE}_{\rm red}-{\rm SSE}_{\rm full}  ] / [ df_{\rm red}-df_{\rm full}   ]  }{ {\rm SSE}_{\rm full}/df_{\rm full}}$$ such that under the null hypothesis, $F^* \sim F( (a-1)(b-1), n_T-ab)$.
+
+```{r, echo=F,warning=F,error=F,message=F}
+model_int <- aov(math_mean_byteacher ~ g1classtype * g1schid, data= STAR)
+#kable(summary(model_int)[[1]])
+```
+
+This F-test gives a p value of 0.461. In other words, the probability of observing an F statistic at least as extreme as the F value computed by this ANOVA under the null hypothesis is 63.1%, which is not enough to reject the null hypothesis at the 5% significance level. Thus, the reduced model will be used:
+
+$$Y_{ijk} = \mu_{..} + \alpha_{i} + \beta_{j} + \epsilon_{ijk}$$
+
+And all corresponding assumptions on the omitted term $(\alpha\beta)_{ij}$ will be relaxed.
+
+## ANOVA Results
+
+Although the groups of teachers indexed by k are not similarly sized between either school grouping or class size grouping, type I ANOVA methodology is used. To justify this, observe that for type I ANOVA, the treatment sum of squares provided is in the form $SSTO - SSE_A$, rather than $SSE_B - SSE_A$ for type II. Because the primary question of interest is whether there are any differences in math scaled scores in 1st grade across class types, type I is better suited to this analysis. Also, given that the experimental design dictated that teachers be randomly assigned to schools and students be randomly assigned to each class type, it is reasonable to assume that any correlation between school and class size will not be deterministic of the outcome variable, i.e. scaled math scores. Note that in the case these assumptions are deemed insufficient, later sensitivity analysis will verify that alternative models--including a model using type II ANOVA--yield similar results.
+
+In order to test whether class type has an effect on math scores, the following hypotheses are used:
+
+\[ H_0: \alpha_i = 0 \forall \ i\]
+against the alternative 
+\[H_1: {\rm not \ all\ } \alpha_i \ {\rm are\ 0}.\]
+
+```{r, echo=F,warning=F,error=F,message=F}
+model_main <- aov(math_mean_byteacher ~ g1classtype + g1schid, data= STAR)
+kable(cbind(tibble(` `= c("Class Type", "School ID", "Residuals")), as_tibble(summary(model_main)[[1]]))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+The first model includes the previously mentioned dummy variable indicating whether disruptive students are present in the group. In this model, only school ID and class type are significant at the 1% level for the estimation of mean math scores (the associated probabilities with the F values for class type and school ID are 3.522e-09 and <2.2e-16 respectively).
+
+The following coefficients on class type are obtained: 
+
+```{r, echo=F,warning=F,error=F,message=F}
+model_main_coeff <- t(as_tibble(model_main$coefficients[1:3]))
+colnames(model_main_coeff) <-  c("(Intercept)", "Regular Class", "Regular + Aide Class")
+kable(model_main_coeff) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+From these selected reported coefficients, it appears that the regular and regular + aide class types have a lower estimated math score from this model. Note that the intercept as reported above does *not* correspond to the mean of the reference group (in this case small class type) due to the use of two-way anova. Instead, to statistically compare these groups and test for significance between the groups, a Tukey's range test will be used. This test will again be carried out at the 1% significance level, noting the fact that for unbalanced sample sizes this will produce a conservative estimate (i.e. coverage probability of at least 95%). This test will allow for the construction confidence intervals of each group mean and compare whether these intervals overlap to identify the highest-performing class size $i$.
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+tukey_test <- TukeyHSD(model_main,"g1classtype",conf.level=.99)
+
+tuk_plot <- function (x, xlab, ylab, ylabels = NULL, ...) {
+  for (i in seq_along(x)) {
+    xi <- x[[i]][, -4L, drop = FALSE]
+    yvals <- nrow(xi):1L
+    dev.hold()
+    on.exit(dev.flush())
+    plot(c(xi[, "lwr"], xi[, "upr"]), rep.int(yvals, 2L), 
+         type = "n", axes = FALSE, xlab = "", ylab = "", main = NULL, 
+         ...)
+    axis(1, ...)
+    # change for custom axis labels
+    if (is.null(ylabels)) ylabels <- dimnames(xi)[[1L]]
+
+    axis(2, at = nrow(xi):1, labels = ylabels, 
+         srt = 0, ...)
+    abline(h = yvals, lty = 1, lwd = 0.5, col = "lightgray")
+    abline(v = 0, lty = 2, lwd = 0.5, ...)
+    segments(xi[, "lwr"], yvals, xi[, "upr"], yvals, ...)
+    segments(as.vector(xi), rep.int(yvals - 0.1, 3L), as.vector(xi), 
+             rep.int(yvals + 0.1, 3L), ...)
+    title(main = paste0(format(100 * attr(x, "conf.level"), 
+                               digits = 2L), "% family-wise confidence level\n"), 
+          # change for custom axis titles
+          xlab = xlab, ylab = ylab)
+
+    box()
+    dev.flush()
+    on.exit()
+  }
+}
+
+par(mfrow=c(1,1), mar = c(5,20,5,0))
+tuk_plot(tukey_test,xlab = "Differences in mean levels of class type",ylab = "", las=1 , col="brown")
+```
+
+The results of the Tukey's range test indicate that the difference between the "small" and "regular" class sizes are statistically significantly different, as well as the "small" and "regular with aide" class groups. Note that the "regular" and "regular with aide" class groups are not statistically different at the $\alpha = 0.1$ level, although this does not prevent us from determining that the "small" class size produces the highest scaled mean math scores at the 1% significance level.
+
+
+
+# Sensitivity analysis 
+
+First, the assumptions of the model selected above will be explored. In particular, a residual vs fitted plot, Q-Q, and Cook's distance plot can be examined.
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=4}
+par(mfrow=c(1,3))
+plot(model_main, which=c(1,2,4))
+```
+
+
+Using these plots, empirical measures of the assumptions made under the ANOVA model can be explored. The "Residuals vs Fitted" plot demonstrates that the residuals do not appear to exhibit any particular patterns across the range of fitted values and do exhibit fairly constant variance, providing some support that the model selected captures the major effects on the outcome variable given the data. Thus, it is reasonable to believe that the heteroskedasticity and independence assumptions on the residuals are met.
+
+The Q-Q plot does demonstrate a somewhat heavier tailed distribution on the standardized residuals relative to the theoretical quantiles of a normal distribution.
+
+For the "Cook's Distance" plot, observe that there are several outlying data points. It could be argued that these points might need to be excluded from the model, although here it is reasonable to believe that the dataset is sufficiently large to obscure any major confounding effect from these points. The very high significance of the results of the hypothesis test on the model further supports this contention.
+
+In general, these plots support the previous assumptions for the ANOVA model. For further investigation into the potential lack of normality shown in the Q-Q plot, it is reasonable to believe that some normalization of the data via Box-Cox may increase the normality of the residuals. Conducting the corresponding transformation to the Box-Cox parameter of $\lambda = -1.8$, it can be observed that the significance of the previous results nor the answers to the questions of interest change. Furthermore, this correction only very slightly reduces the deviation from normality of the residuals by flattening the tails on the Q-Q plot (see appendix), so it is reasonable to assume that the original model is still preferred due to its superior interpretability.
+
+## Alternative Models
+
+Several alternative models have been considered to ensure robustness of the previously stated results. 
+
+First, a model under type II ANOVA is applied to the same data. 
+
+```{r, echo=F,warning=F,error=F,message=F}
+model_typeII=Anova(lm(math_mean_byteacher~g1classtype+g1schid,data=STAR), type="II")
+kable(cbind(tibble(` `= c("Class Type", "School ID", "Residuals")), as_tibble(model_typeII))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+Here, under similar assumptions (i.e. with the relaxation of the balanced cells assumption), it appears that the F statistics are more extreme for both class type and school ID. This reinforces the previous finding from the main model and demonstrates that the level of significance previously shown is, if anything, a lower bound.
+
+Next, a model using random effects on school can be applied to the data. Although the teachers have been randomly assigned to each school, the schools themselves were *not* randomly selected from the general population and were fixed prior to the experiment being conducted. As such, there is insufficient evidence to motivate this mixed effects model; however, an exploration is worthwhile for establishing further robustness. This model makes the following assumptions:
+
+$$ Y_{ijk} =  \mu_{\cdot\cdot} + \alpha_i+\beta_j +\epsilon_{ijk}, \ k=1,\ldots, n, j=1,\ldots, b, i=1,\ldots, a, $$
+
+Where 
+\(Y_{ijk}\) is the mean scaled math score of the ith class type and the jth school ID, 
+
+\(\mu_{\cdot\cdot}\) is the population mean of mean scaled math score across all class types, 
+
+\(\alpha_i\) is the non-causal effect of the ith class type on mean math score, 
+
+\(\beta_j\) is the non-causal effect of the jth school ID on mean math score, 
+
+\(\epsilon_{ijk}\stackrel{iid}{\sim} N(0,\sigma^2)\) are the noise of the model at the kth teacher of the ith class type and jth school.
+
+Also, 
+(i) $\sum \alpha_i =0$, (ii) $\beta_j$ are i.i.d. $N(0,\sigma_{\beta}^2)$, (iii) $\{\epsilon_{ijk}\}$ are i.i.d. $N(0,\sigma^2)$, and (iv)  $\{ \beta_j\}$, $\{\epsilon_{ijk} \}$ are mutually independent. 
+
+```{r, echo=F,warning=F,error=F,message=F}
+model_mixed=lmer(math_mean_byteacher~g1classtype+(1|g1schid),data=STAR)
+
+kable(cbind(tibble(` `= c("Intercept", "Regular Class", "Regular + Aide Class")),
+            as_tibble(confint(model_mixed,level = (1-(.01/2)))[-c(1,2),]))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+
+# kable(confint(model_mixed,level = (1-(.01/2)))[-c(1,2),], row.names = c("Intercept", "Regular Class", "Regular + Aide Class"))
+```
+
+Using a Bonferroni correction on the confidence level for these two simultaneous tests such that $\alpha = \frac{0.01}{2} = 0.005$, the above confidence intervals for the estimates are obtained. As can be observed, neither confidence interval contains zero, confirming that even under this model, the improvement of test scores in the small class sizes is significant at the 1% level.
+
+
+## Alternative Summary Statistics of the Outcome Variable
+
+While justification was provided for the selection of the mean scaled math scores as a summary statistic, it may be that other measures of each classroom's distribution may yield different results. As such, the median, 10th quantile, and 90% quantile are explored through alternative models. In particular, the non-central measures are of value as they may reveal how exceptionally bright or struggling students respond differently to class type.
+
+Both median math scaled scores and 10th quantile reveal the same findings for both questions of interest. Again, the null hypothesis can be rejected at the 1% significance level, and both regular and regular + aide class types appear to statistically significantly underperform the small class type.
+
+However, 90th percentile scores from each classroom demonstrate a slightly different trend for the Tukey's range test. While the hypothesis test is similarly rejected at the 1% signficance level, i.e. there is evidence to believe that group means differ across at least one group, the Tukey's range test reveals that only the regular and small class groups differ.
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+model_90th <- aov(math_90_byteacher ~ g1classtype + g1schid, data= STAR)
+
+
+tukey_test_90th <- TukeyHSD(model_90th,"g1classtype",conf.level=.99)
+
+
+par(mfrow=c(1,1), mar = c(5,20,5,0))
+tuk_plot(tukey_test_90th,xlab = "Differences in 90th quantiles of class type",ylab = "", las=1 , col="brown")
+```
+
+One possible explanation for this finding is that students who tend to outperform their peers benefit more from individual attention from their teachers, and both the small and regular + aide classes have a higher teacher-to-student ratio. While the difference between the regular + aide and regular class types is not significant at the 1% level, it is very close, suggesting that there is some measurable difference in performance between the two (even if it is not possible to reject the null hypothesis at this level).
+
+## Covariates and Model Selection
+
+One potential objection to the previous findings would be the lack of inclusion for additional covariates, especially given the difference in characteristics of students and teachers. To address this, model selection using the Akaike information criterion will be used to consider models with additional covariates, rewarding model fit and punishing overfitting via a penalty on the number of parameters.
+
+AIC is given by: $-2(ln(L) - 2k)$, where $L$ is the maximum value of the log-likelihood function of a given model and $k$ is the number of parameters. A lower AIC indicates a superior model.
+
+The full model used will include all of the previously graphically depicted covariates of teacher characteristics, such as number of years teaching and gender.
+
+```{r, echo=F,warning=F,error=F,message=F}
+STAR_AIC_full <- STAR_df %>% 
+  filter(!is.na(g1classtype)) %>%
+  mutate(g1schid = as.factor(g1schid)) %>%
+  group_by(g1tchid,g1classtype,g1schid,g1surban,g1tgen,g1trace,g1thighdegree,g1tcareer,g1tyears) %>%
+  summarize(math_mean_byteacher = mean(g1tmathss,na.rm=T)) %>%
+  na.omit()
+
+model_AIC_full <- aov(math_mean_byteacher ~ ., data= STAR_AIC_full)
+
+model_AIC_none <- aov(math_mean_byteacher ~ 1,data = STAR_AIC_full)
+
+AIC_model <- stepAIC(model_AIC_none, scope=list(upper=model_AIC_full, lower = ~1), direction="both", k=2, trace = FALSE, steps = 1e6)
+
+kable(cbind(tibble(` `= c("Class Type", "School ID", "Race", "Residuals")), as_tibble(summary(AIC_model)[[1]]))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+Using 1,000,000 steps, forward stepwise AIC selects a model with all levels of class size, but only two school ID's. The AIC regression also indicates the inclusion of a race covariate, although this covariate is not significant at any meaningful level and can be excluded. As AIC imposes a relatively harsh penalty on the number of parameters, it is unsurprising that so many levels of the 75 different school IDs would be removed. Given the previous sensitivity analysis of different quantiles of the 1st grade student test scores distributions and the fact that school appears to internalize a great amount of variability caused by different demographic characteristics of students at different schools, it appears reasonable to exclude any additional covariates and sufficiently reject the notion of heterogeneity.
+
+# Discussion 
+
+In general, the preceding analysis has revealed that small class sizes tend to outperform larger class sizes on scaled math scores based on the STAR data set. Historically, the findings from the STAR experiment have been used to support the notion that smaller class sizes are causally linked to superior classroom performance from students *and* that schools should strive to increase the teacher-to-student ratio.
+
+
+## Special Consideration: Socialization
+
+However, many children at young ages are likely similarly sensitive to changes imposed on their socialization as to relative changes in class size. In particular, children with natural tendencies towards disruptiveness experience difficulty in their ability to absorb new information (Liu 2017). Additionally, proper socialization and peer exposure shapes children's cognitive development at a young age (Adler 1998). From these factors, it is reasonable to assume that socialization plays a substantial role in determining the academic performance of the children in the STAR experiment.
+
+The STAR dataset contains two relevant variables that will be used in this section:
+
+1. "g8pmanoy", or the reporting of teachers on how often students annoy their classmates. If an interaction exists between this variable and the class size variable of interest, it may be reasonable to infer that consideration for sociability of students should be considered when estimating benefits of shrinking class sizes. It is important to not that these scores were collected 7 years after the timeframe of interest, however it is plausible that students might demonstrate similar levels of class disruption throughout this period of their lives. Also, note that there are only ~2100 the students with recorded annoyance scores who participated in STAR in 1st grade.
+
+2. "g1selfconcraw", or the SCAMIN self-concept scores that report a child's ability to actualize emotions and relationships. Again, if an interaction exists between this variable and the class size variable of interest, it may be reasonable to infer that a child's self-concept and social intelligence may dictate his or her marginal benefit from reduced class sizes. It is important to note that SCAMIN has been criticized for its lack of generalizability outside of middle-income and suburban students (Schanzenbach 2006).
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=4}
+STAR_social <- STAR_df %>%
+  filter(!is.na(gkclasstype) & !is.na(g1classtype) & !is.na(gkselfconcraw) & !is.na(g1selfconcraw),
+         gkschid == g1schid,
+         gkclasstype == g1classtype) %>%
+  mutate(conceptimp = gkselfconcraw - g1selfconcraw)
+
+STAR_social_classtype <- STAR_social %>% group_by(gkclasstype) %>% 
+  summarize(conceptimp = mean(conceptimp,na.rm=T),
+            gkselfconcraw = mean(gkselfconcraw,na.rm=t),
+            g1selfconcraw = mean(g1selfconcraw,na.rm=t))
+
+STAR_disrupt <- STAR_df %>% 
+  filter(!is.na(g1classtype) & !is.na(g8pmanoy))
+
+STAR_disrupt_classtype <- STAR_disrupt %>% group_by(g1classtype) %>% 
+  summarize(g8pmanoy = mean(as.numeric(g8pmanoy)))
+
+
+# model_disrupt <- aov(g1tmathss ~ g8pmanoy * g1classtype, STAR_disrupt)
+# model_disrupt
+# kable(summary(model_disrupt)[[1]],caption = "Disruptiveness Model")
+# 
+# model_concept <- aov(as.numeric(g1selfconcraw) ~ gkclasstype, STAR_social)
+# model_concept
+# kable(summary(model_concept)[[1]],caption = "Self-Concept Model")
+
+
+social_violin_plot <- ggplot(STAR_social, aes(gkclasstype, g1selfconcraw)) +
+  geom_violin(aes(fill = gkclasstype)) +
+  geom_point(data=STAR_social_classtype, aes(gkclasstype, g1selfconcraw),color="black") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2") +
+  xlab("Class Type") + 
+  ylab("Self Concept Score") + 
+  labs(fill = "Class Type") + 
+  ggtitle("Self Concept Score in Grade 1, by Class Type") +
+  theme(legend.position = "none")
+
+# ggplot(STAR_disrupt, aes(g1classtype, as.numeric(g8pmanoy))) +
+#   geom_violin(aes(fill = g1classtype)) +
+#   geom_point(data=STAR_disrupt_classtype, aes(g1classtype, g8pmanoy),color="black") +
+#   theme_minimal() +
+#   scale_fill_brewer(palette = "Dark2") +
+#   xlab("Class Type") + 
+#   ylab("Disruption/Annoyance Score") + 
+#   labs(fill = "Class Type",subtitle = "(Scores Assessed in Grade 8)") + 
+#   ggtitle("Annoyance Score in Grade 1, by Class Type") + 
+#   theme(legend.position = "none")
+
+disrupt_bar_plot <- ggplot(STAR_disrupt, aes(as_factor(g8pmanoy))) +
+  geom_bar(aes(fill =g1classtype)) +
+  facet_grid(~g1classtype) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2") +
+  xlab("Class Type") + 
+  ylab("Disruption/Annoyance Score") + 
+  labs(fill = "Class Type",subtitle = "(Scores Assessed in Grade 8)") + 
+  ggtitle("Annoyance Score in Grade 1, by Class Type") + 
+  theme(axis.text.x = element_text(angle = 45,hjust=.75),legend.position = "none")
+
+plot_grid(social_violin_plot, disrupt_bar_plot)
+
+kable(STAR_social_classtype[,1:2],caption="Mean Improvement in Self-Concept",
+      col.names = c("Class Type", "Concept Improvement from Kindergarten to 1st Grade")) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+
+kable(STAR_disrupt_classtype,caption="Mean Disruptiveness",
+      col.names = c("Class Type", "Mean Disruptiveness of 1st Grade Students")) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+Based on differences in self concept scores between different class groups of 1st grade students, it does not appear that self-concept varies substantially in distribution between groups. However, observing the differences in distribution of annoyance score between different class types, a more thorough investigation of annoyance scores appears to be warranted. Another consideration is that highly disruptive students may be the most influential on their peers' abilities to learn if the motivation for this additional exploration does indeed hold. Due to this, further analysis will also account for the inclusion of highly distracting students in each classroom via a dummy variable--if there are no students with an annoyance score of 5 (reported as "always" annoying other students) present in a classroom, then this variable will take the value of $0$, otherwise it will take the value of $1$.
+
+If self concept scores improve more in smaller classes, then it is more reasonable to assume that self-concept falls on the causal pathway between class size and academic performance. However, it is not possible to completely identify the causality of this relationship. In other words, being in a smaller classrooms may increase a student's self-concept, causing them to learn better--or students with superior self-concept may learn more efficiently from being in a smaller classroom, or both. Although students in smaller class sizes seem to demonstrate more improvement in their self-concept scores between kindergarten and first grade, it is not clear without further statistical investigation whether there is a correlation between this trend and higher test scores. 
+
+Similarly, if annoyance scores are lower in small classes, it is plausible that teachers are able to focus more on students with behavioral issues in the small classes and eliminate these additional distractions more effectively, again placing the annoyance measure on the causal pathway rather than identifying it as a confounding variable. However, it should be noted that the assumption that the students demonstrate consistent behavior from younger grades (e.g. 1st grade) into middle school when the scores were recorded by teachers is an extremely strong assumption. 
+
+The results from the analysis of the self-concept model suggest that student self-concept does not appear to be a significant determinant of math scores. Somewhat surprisingly, the measure of student disruptiveness appears to be significant at the 5% level. Further exploration of this data using aggregation at the teacher level will also include a dummy variable indicating whether there any students with a reported maximum disruptiveness score (reported as "always" annoying other students) were present in the classroom during grade 1--the motivation for which being that the most disruptive students likely demand more attention from teachers for disciplinary purposes, thereby reducing the instructing time for their classroom at large.
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=6, fig.height=4}
+
+
+trend_disruptor_df <- STAR_raw %>%
+  filter_all(any_vars(!is.na(.))) %>%
+  pivot_longer(cols = ends_with("tchid"), names_to = "Grade", values_to = "Teacher",
+               names_pattern = "g(\\d|k)") %>%
+  pivot_longer(cols = ends_with("classtype"), names_to = "GradeCT", values_to = "ClassType",
+               names_pattern = "g(\\d|k)") %>%
+  filter(Grade == GradeCT) %>%
+  group_by(Grade, Teacher, ClassType) %>%
+  summarize(has_disruptor = sum(g8pmanoy=="ALWAYS",na.rm=T) > 0) %>%
+  group_by(Grade, ClassType) %>%
+  summarize(Disruptor_Percent = sum(has_disruptor) / n() * 100) %>%
+  ungroup() %>% 
+  na.omit() %>%
+  mutate(Grade = str_replace(Grade, "k", "K")) %>%
+  mutate(Grade = factor(Grade, levels = c("K","1","2","3")))
+
+
+ggplot(trend_disruptor_df) +
+  geom_line(aes(Grade,Disruptor_Percent, group = ClassType, color = ClassType), linewidth = 2) + 
+  theme_minimal() +
+  xlab("Grade") + 
+  ylab("Disruptor %") + 
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("Disruptor % over Time, by Class Type")
+
+# pie_df <- STAR %>% group_by(g1classtype) %>%
+#   summarize(True = sum(has_disruptor) / n() * 100,
+#             False = (n() - sum(has_disruptor)) / n() * 100) %>%
+#   pivot_longer(c(True,False),names_to = "Has Disruptor") %>% 
+#   na.omit()
+# 
+# 
+# ggplot(pie_df, aes(x="", y=value, fill=`Has Disruptor`))+
+#   geom_bar(width = 1, stat = "identity") +
+#   coord_polar("y", start=0) +
+#   theme(axis.text.x=element_blank()) +
+#   geom_text(aes(y = (10+value)/3,
+#             label = percent(value/100))) +
+#   theme(axis.text.x=element_blank()) +
+#   theme_void() +
+#   scale_fill_brewer(palette = "Dark2") + 
+#   facet_grid(~g1classtype) + 
+#   ggtitle("Percentage of 1st Grade Classrooms with/without a Disruptor")
+
+# STARk <- STAR_raw %>%
+#   group_by(gktchid,gkclasstype,gkschid) %>%
+#   summarize(math_mean_byteacher = mean(gktmathss,na.rm=T),
+#             math_med_byteacher = median(gktmathss,na.rm=T),
+#             math_10_byteacher = quantile(gktmathss,.1,na.rm=T),
+#             math_90_byteacher = quantile(gktmathss,.9,na.rm=T),
+#             has_disruptor = sum(g8pmanoy=="ALWAYS",na.rm=T) > 0,
+#             mean_disruption = mean(as.numeric(g8pmanoy),na.rm=T))
+# 
+# piek_df <- STARk %>% group_by(gkclasstype) %>%
+#   summarize(True = sum(has_disruptor) / n() * 100,
+#             False = (n() - sum(has_disruptor)) / n() * 100) %>%
+#   pivot_longer(c(True,False),names_to = "Has Disruptor") %>% 
+#   na.omit()
+# 
+# 
+# ggplot(piek_df, aes(x="", y=value, fill=`Has Disruptor`))+
+#   geom_bar(width = 1, stat = "identity") +
+#   coord_polar("y", start=0) +
+#   theme(axis.text.x=element_blank()) +
+#   geom_text(aes(y = (10+value)/3,
+#             label = percent(value/100))) +
+#   theme(axis.text.x=element_blank()) +
+#   theme_void() +
+#   scale_fill_brewer(palette = "Dark2") + 
+#   facet_grid(~gkclasstype) + 
+#   ggtitle("Percentage of Kindergarten Classrooms with/without a Disruptor")
+```
+
+A breakdown across class type shows that the percentage of highly disruptive students are higher in the small and regular + aide classes. A possibility to consider is that students with high peer annoyance scores left their schools before reaching 8th grade if they were in class types with lower teacher-to-student ratios (recall that regular + aide has the highest teacher-to-student ratio). Alternatively, there may have been issues with randomization, as teachers strove to move more disruptive students into class types where they could receive more attention. Due to this ambiguity, it is difficult to interpret these trends directly. 
+
+Unlike the initial analysis, the type II ANOVA model is used for all following models. Not only does the data still exhibit the imbalance of number of teachers per cell of school ID and class type, but these models are now motivated by consideration of the variation explained by disruptive students and socialization scores.
+
+<!-- these models depend the assumptions that the dataset is sufficiently large to justify balanced ANOVA and that the primary question of interest, namely whether there any differences in math scaled scores in 1st grade across class types, does not necessitate .  -->
+
+The first model addressing socialization includes mean disruptiveness scores in addition to the variables used in the primary analysis, namely class type and school ID.
+
+```{r, echo=F,warning=F,error=F,message=F}
+# model_meandisrupt <- aov(math_mean_byteacher ~ g1schid + mean_disruption + g1classtype, data= mutate(STAR, g1schid = as_factor(g1schid))))
+# kable(cbind(tibble(` `= c("School ID", "Mean Disruption Score", "Class Type", "Residuals")), as_tibble(summary(model_meandisrupt)[[1]]))) %>%
+#   kable_styling(full_width = F) %>%
+#   kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+
+model_meandisrupt <- Anova(lm(math_mean_byteacher ~ g1classtype + mean_disruption + g1schid, data= STAR, type = "II"))
+kable(cbind(tibble(` `= c("Class Type", "Mean Disruption Score", "School ID", "Residuals")), as_tibble(model_meandisrupt))) %>%
+  kable_styling(full_width = F) %>%
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+It appears that the mean disruption is not statistically significant at the 1% level. This is largely expected given that the data were collected seven years apart, although it is somewhat surprising that there is some link between the annoyance scores of the students and their performance on tests. The coefficient on the mean disruptiveness score for each classroom is -2.99, indicating that higher density of annoying children tends to decrease the class-wide average scaled math scores, albeit not significantly. Separate models including interaction terms were tested and were similarly unable to reject equivalency of the terms $(\alpha \beta)_{ij} = 0 \forall \ i,j$ at the 1% significance level. Additional analysis using type I ANOVA revealed the significance of this mean disruption variable is largely dependent on the order of variables, and the variability of school ID explains most of the variability of mean student disruptiveness on mean math scores.
+
+The second model includes the indicator variable indicating whether there are highly disruptive students present of each teacher's classroom, as well as the other variables included in the main model. 
+
+```{r, echo=F,warning=F,error=F,message=F}
+model_hasdisrupt <- Anova(lm(math_mean_byteacher ~ g1classtype + has_disruptor + g1schid, data= STAR), type = "II")
+kable(cbind(tibble(` `= c("Class Type", "Has Disruptor", "School ID", "Residuals")), as_tibble(model_hasdisrupt))) %>%
+  kable_styling(full_width = F) %>%
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+The dummy variable associated with the presence of highly disruptive students is not significant at the 1% level, suggesting that there is no clear relationship between highly annoying 8th graders and their mean scaled math scores as 1st grade students. Again, no interaction terms were significant at the 1% level. 
+
+The following model includes the mean self concept scores of the 1st grade students.  
+```{r, echo=F,warning=F,error=F,message=F}
+# aov(math_mean_byteacher ~ g1classtype + mean_scamin + g1schid, data= STAR)$coef
+
+model_scamin1 <- Anova(lm(math_mean_byteacher ~ g1classtype + mean_scamin + g1schid, data= STAR), type = "II")
+kable(cbind(tibble(` `= c("Class Type", "1st Grade Self Concept", "School ID", "Residuals")), as_tibble(model_scamin1))) %>%
+  kable_styling(full_width = F) %>%
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+In this model, it appears that the self-concept score is significant at the 5% level. More surprisingly, the associated coefficient on SCAMIN is 1.22, suggesting that poorer self-concept actually produces higher test scores (lower raw self concept scores as tested via the SCAMIN metric correspond to superior self concept). However, the self-concept score appears to explain a relatively low amount of variability in the outcome variable, bringing its interpretability and validity into question. Again, interaction terms are not significant at any reasonable level of $\alpha$.
+
+```{r, echo=F,warning=F,error=F,message=F}
+model_scaminimp <- Anova(lm(math_mean_byteacher ~ g1classtype + imp_scamin + g1schid, data= STAR), type = "II")
+kable(cbind(tibble(` `= c("Class Type", "SCAMIN Improvement", "School ID", "Residuals")), as_tibble(model_scaminimp))) %>%
+  kable_styling(full_width = F) %>%
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+The inclusion of the improvement in self-concept has shockingly low explanatory value for mean math scores. This strongly indicates that a student's ability to progress self-concept between kindergarten and 1st grade has little bearing on their academic performance. This does reinforce the directionality of the previous model, as it becomes much more likely that classroom type affects self-concept development--instead, it is more likely that students with different self-concept scores possess varying ability to perform well on tests.
+
+Ultimately, the effect of socialization on academic performance is relatively unclear from this dataset. Future experimental design could provide more emphasis on measurable socialization of students as well as general social cohesion of the students in each classroom. While there is some evidence that students' sociability affects their math test scores, it is difficult to assign variability in the outcome variable to factors other than school ID and class type with a high level of statistical certainty.
+
+
+
+# Appendix 
+
+## Box-Cox
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=0.5}
+library(ggtext)
+main_title_plot <- ggplot() +
+  geom_textbox(
+    aes(x = 0, y = 0, label = "Main Model"),
+    box.colour = NA,
+    size = 19 / .pt) + 
+  theme_void() 
+
+bc_title_plot <- ggplot() +
+  geom_textbox(
+    aes(x = 0, y = 0, label = "Box-Cox Model"),
+    box.colour = NA,
+    size = 19 / .pt) + 
+  theme_void() 
+
+plot_grid(main_title_plot,bc_title_plot)
+```
+
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+
+par(mfrow=c(2,2), mar = c(5,1,1,3))
+b <- boxcox(model_main)
+lambda <- b$x[which.max(b$y)]
+
+model_bc <- aov(((math_mean_byteacher ^ lambda - 1) / lambda)~g1classtype+g1schid,data=STAR)
+
+boxcox(model_bc)
+plot(model_bc, which=c(2))
+plot(model_main, which=c(2))
+```
+
+## Alternative Summary Statistics
+
+Median: 
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+model_median <- aov(math_med_byteacher ~ g1classtype + g1schid, data= STAR)
+kable(cbind(tibble(` `= c("Class Type", "School ID", "Residuals")), as_tibble(summary(model_median)[[1]]))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+
+tukey_test_median <- TukeyHSD(model_median,"g1classtype",conf.level=.99)
+
+
+par(mfrow=c(1,1), mar = c(5,20,5,0))
+tuk_plot(tukey_test_median,xlab = "Differences in median levels of class type",ylab = "", las=1 , col="brown")
+```
+
+10th Quantile:
+
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+model_10th <- aov(math_10_byteacher ~ g1classtype + g1schid, data= STAR)
+kable(cbind(tibble(` `= c("Class Type", "School ID", "Residuals")), as_tibble(summary(model_10th)[[1]]))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+
+tukey_test_10th <- TukeyHSD(model_10th,"g1classtype",conf.level=.99)
+
+
+par(mfrow=c(1,1), mar = c(5,20,5,0))
+tuk_plot(tukey_test_10th,xlab = "Differences in median levels of class type",ylab = "", las=1 , col="brown")
+```
+
+90th Quantile:
+
+
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+model_90th <- aov(math_90_byteacher ~ g1classtype + g1schid, data= STAR)
+kable(cbind(tibble(` `= c("Class Type", "School ID", "Residuals")), as_tibble(summary(model_90th)[[1]]))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+
+tukey_test_90th <- TukeyHSD(model_90th,"g1classtype",conf.level=.99)
+
+
+par(mfrow=c(1,1), mar = c(5,20,5,0))
+tuk_plot(tukey_test_90th,xlab = "Differences in 90th quantiles of class type",ylab = "", las=1 , col="brown")
+```
+
+# Acknowledgement {-}
+
+I discussed this project with Thommas Phan.
+
+# Reference {-}
+
+Adler, P. A., & Adler, P. (1998). Peer power: Preadolescent culture and identity. New Brunswick, NJ: Rutgers, University Press.
+
+Achilles, C. M. (2012, September 30). Class-size policy: The Star Experiment and related class-size studies. NCPEA policy brief Volume 1, Number 2. NCPEA Publications. https://eric.ed.gov/?id=ED540485 
+
+Achilles, C.M.; Helen Pate Bain; Fred Bellott; Jayne Boyd-Zaharias; Jeremy Finn; John Folger; John Johnston; Elizabeth Word, (2008). Tennessee's Student Teacher Achievement Ratio (STAR) project. https://doi.org/10.7910/DVN/SIWH9F, Harvard Dataverse, V1, UNF:3:Ji2Q+9HCCZAbw3csOdMNdA== [fileUNF] 
+
+Liu, CY., Huang, WL., Kao, WC. et al. (2017). Influence of Disruptive Behavior Disorders on Academic Performance and School Functions of Youths with Attention-Deficit/Hyperactivity Disorder. Child Psychiatry Hum Dev 48, 870–880 . https://doi.org/10.1007/s10578-017-0710-7
+
+Schanzenbach, D. W. (2006). What Have Researchers Learned from Project STAR? Brookings Papers on Education Policy, 9, 205–228. http://www.jstor.org/stable/20067282
+
+# Session info {-}
+
+```{r}
+sessionInfo()
+```
