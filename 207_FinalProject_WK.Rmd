@@ -23,16 +23,17 @@ caption {
 
 # Abstract
 
-The STAR dataset is widely known for its scale and rigorousness, with the results often cited as evidence of the positive effect of small class sizes. This report aims to identify the relationship between the treatment variable of class size and the outcome variable of scaled 1st grade math scores, with additional consideration for the heterogeneous factors associated with individual schools. A two-way ANOVA design using these two fixed effects to estimate the mean math scores of class size is scrutinized for any potential methodological gaps and reinforced via extensive sensitivity analysis. Further investigation explores alternative metrics of academic performance and potential confounding effects of inter-socialization of students. Ultimately, the benefit of class size reduction is found to be supported by the STAR data with few caveats limiting the experiment's robustness.
+The STAR dataset is widely known for its scale and rigorousness, with the results often cited as evidence of the positive effect of small class sizes. This report aims to identify the relationship between the treatment variable of class size and the outcome variable of scaled 1st grade math scores, with additional consideration for the heterogeneous factors associated with individual students and schools. A two-way ANOVA design using the two fixed effects of school ID and class type to estimate the mean math scores of each classroom is scrutinized for any potential methodological gaps and reinforced via extensive sensitivity analysis. Further investigation explores alternative metrics of academic performance and potential confounding effects of inter-socialization of students. Ultimately, the benefit of class size reduction is found to be supported by the STAR data with few caveats limiting the experiment's robustness.
 
 
 # Introduction
 
 The Tennessee Student Teacher Achievement Ratio (STAR) was a groundbreaking study in the 1980s due to its thoroughness and enormous scale. The experiment gathered longitudinal data on thousands of students, measuring their test outcomes over the course of their time in grade school. After random assignment to one of three class sizes and types, STAR tracked students' performance from Kindergarten to 3rd grade with particular attention directed towards the causal link between class size reduction and academic performance--consequently establishing substantial evidence for the benefits of small class sizes. STAR was a landmark study for both its robustness of design and generalizability for tangible and immediate school policy recommendations.
 
-Despite its widespread acceptance, the methodology of STAR is occasionally criticized for issues of noncompliance due to students dropping from the program over the course of the program and inadequate record-keeping of the initial randomization process. Some have also raised the objection that the measurable benefit of smaller class sizes may be exclusive to early education (Schanzenbach 2006).
+Despite its widespread acceptance, the methodology of STAR has been criticized for issues of noncompliance due to students dropping from the program over the course of the program and inadequate record-keeping of the initial randomization process. Some objectors have also cited that the immediate measurable benefit of smaller class sizes may be exclusive to early education (Schanzenbach 2006).
 
 The primary question of interest for this analysis is: Are there any differences in math scaled scores in 1st grade across class types? 
+
 The secondary question of interest is: Which class type is associated with the highest math scaled scores in 1st grade?
 
 With these questions as a focal point, this study aims to identify the extent to which the experimental STAR program can be statistically substantiated. Particular attention will be given to the magnitude of the effect of the potential benefit of smaller class sizes and whether alternative measures can explain the variability in 1st grade scaled math scores of students--namely, potential flaws in experimental design and student sociability metrics.
@@ -41,7 +42,7 @@ With these questions as a focal point, this study aims to identify the extent to
 # Background 
 
 
-The longitudinal, student-level data of the Tennessee Student Teacher Achievement Ratio were gathered over four years, from 1985 until 1989. While the majority of the variables pertain to demographic and academic performance metrics over this span, additional data were collected on the students' performance in middle school and beyond. Among the 379 variables describing these 11601 students are the demographic characteristics and assignment groups relating to their teachers, schools, and treatment groups. 
+The bulk of the longitudinal, student-level data of the Tennessee Student Teacher Achievement Ratio were gathered over four years, from 1985 until 1989. While the majority of the variables pertain to demographic and academic performance metrics over this span, additional data were collected on the students' performance in middle school and beyond. Among the 379 variables describing these 11601 students are the demographic characteristics and assignment groups relating to their teachers, schools, and treatment groups. 
 
 Students were randomly assigned to one of three treatment groups of class type when they joined the study: 
 
@@ -94,6 +95,8 @@ STAR_df <- STAR_raw %>%
 ```
 
 The STAR dataset provided from the Harvard data base contains 11601 rows corresponding to longitudinal observations of all students involved in the STAR experiment. As this analysis primarily concerns the 1st grade scores, the bulk of the exploratory data analysis focuses on the associated variables of interest for 1st grade students--namely their class type, school ID, and scaled math scores.
+
+## Data Completeness and NA Observations
 
 First, the data are considered for completeness. After filtering for NA values corresponding to missing measurements of the three primary variables of interest, only ~6600 rows remain. Due to interest in the causal link between class type and 1st grade, this incompleteness is primarily of concern if a substantial number of students drop from the STAR program after their initial assignment and patterns are present between the number of students exiting and their initial class type assignment--in which case the randomization assumptions grounding extrapolation to average causal effects may be lost. Thus, this discrepancy warrants some exploration of the ITT and ACE framework via an explicit comparison of mean dropout rates between the different groups of the treatment variable, class type. 
 
@@ -159,11 +162,11 @@ ggplot(STAR_drop1_pie, aes(x="", y=value, fill= Status)) +
 
 Of the 5000 NA values present across these variables, 4500 of the missing rows reflect students who dropped from the program after their kindergarten year. Where this gap may suggest some level of noncompliance, comparison of the number of students dropping across classrooms between different treatment groups of class size reveals that the ratio of students dropping appears to be similarly distributed across the treatment groups. Additionally, under the STAR experimental design, test scores were collected in the spring of each year, and students were included in the dataset if they were enrolled in a particular class as early as October. Thus, even if a student were shifted between groups or joined the program after the first year, they would still have ample time in their given class size group to be exposed to the causal effects. Lastly, the greatest level of program-dropouts belongs to the regular and regular+aide class types, which suggests that if anything, smaller class sizes reduce the likelihood of dropouts. If--as was found in the previous initial analysis--the smaller class sizes are shown to produce a positive result via increased test scores, then these differences can be assumed to be along the causal pathway, rather than an unmeasured confounding effect. 
 
-
+## Variable Exploratory Analysis
 
 Next, variables containing measurements of student characteristics such as gender, race, etc. are considered for the purpose of exploring the distribution of the 1st grade students.
 
-```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=3}
 par(mfrow = c(1, 3), mar = c(0.5,1,1,1))
 pie(table(STAR_df$gender), main = "Student Gender")
 levels(STAR_df$race) <- c("WHITE", "BLACK", "OTHER", "OTHER", "OTHER", "OTHER", "OTHER")
@@ -200,7 +203,7 @@ It appears that white, male, and rural are respectively the most common demograp
 
 Next, characteristics of teachers are explored. Math scores will be aggregated by classroom via the mean scaled math score of the students for each teacher.
 
-```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
+```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=3}
 STAR_df_teacher <- STAR_df %>%
   select(g1classtype, g1tchid, g1tcareer, g1tgen, g1trace, g1thighdegree, g1tyears) %>%
   distinct()
@@ -369,7 +372,7 @@ kable(model_main_coeff) %>%
   kable_minimal(html_font = "Arial", bootstrap_options = "striped")
 ```
 
-From these selected reported coefficients, it appears that the regular and regular + aide class types have a lower estimated math score from this model. Note that the intercept as reported above does *not* correspond to the mean of the reference group (in this case small class type) due to the use of two-way anova. Instead, to statistically compare these groups and test for significance between the groups, a Tukey's range test will be used. This test will again be carried out at the 1% significance level, noting the fact that for unbalanced sample sizes this will produce a conservative estimate (i.e. coverage probability of at least 95%). This test will allow for the construction confidence intervals of each group mean and compare whether these intervals overlap to identify the highest-performing class size $i$.
+From these selected reported coefficients, it appears that the regular and regular + aide class types have a lower estimated math score from this model. Note that the intercept as reported above does *not* correspond to the mean of the reference group (in this case small class type) due to the use of two-way anova. Instead, to statistically compare these groups and test for significance between the groups, a Tukey's range test will be used. This test will again be carried out at the 1% significance level, noting the fact that for unbalanced sample sizes this will produce a conservative estimate (i.e. coverage probability of at least 99%). This test will allow for the construction confidence intervals of each group mean and compare whether these intervals overlap to identify the highest-performing class size $i$.
 
 ```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=5}
 tukey_test <- TukeyHSD(model_main,"g1classtype",conf.level=.99)
@@ -409,11 +412,13 @@ par(mfrow=c(1,1), mar = c(5,20,5,0))
 tuk_plot(tukey_test,xlab = "Differences in mean levels of class type",ylab = "", las=1 , col="brown")
 ```
 
-The results of the Tukey's range test indicate that the difference between the "small" and "regular" class sizes are statistically significantly different, as well as the "small" and "regular with aide" class groups. Note that the "regular" and "regular with aide" class groups are not statistically different at the $\alpha = 0.1$ level, although this does not prevent us from determining that the "small" class size produces the highest scaled mean math scores at the 1% significance level.
+The results of the Tukey's range test indicate that the difference between the "small" and "regular" class sizes are statistically significantly different, as well as the "small" and "regular with aide" class groups. Note that the "regular" and "regular with aide" class groups are not statistically different at the $\alpha = 0.1$ level, although this does not prevent us from determining that the "small" class size produces the highest scaled mean math scores at the 1% significance level. These results are intuitive and support much of the existing literature surrounding class size reduction, as it is highly reasonable to believe that young children might benefit from a greater share of the attention from their primary instructor. It is also possible that students in smaller class sizes are able to follow a more individualized education plan or benefit from socially engaging with a smaller, more intimate group of peers--a possibility which will be quantitatively explored in the later discussion section.
 
 
 
 # Sensitivity analysis 
+
+## Model Assumptions 
 
 First, the assumptions of the model selected above will be explored. In particular, a residual vs fitted plot, Q-Q, and Cook's distance plot can be examined.
 
@@ -430,6 +435,18 @@ The Q-Q plot does demonstrate a somewhat heavier tailed distribution on the stan
 For the "Cook's Distance" plot, observe that there are several outlying data points. It could be argued that these points might need to be excluded from the model, although here it is reasonable to believe that the dataset is sufficiently large to obscure any major confounding effect from these points. The very high significance of the results of the hypothesis test on the model further supports this contention.
 
 In general, these plots support the previous assumptions for the ANOVA model. For further investigation into the potential lack of normality shown in the Q-Q plot, it is reasonable to believe that some normalization of the data via Box-Cox may increase the normality of the residuals. Conducting the corresponding transformation to the Box-Cox parameter of $\lambda = -1.8$, it can be observed that the significance of the previous results nor the answers to the questions of interest change. Furthermore, this correction only very slightly reduces the deviation from normality of the residuals by flattening the tails on the Q-Q plot (see appendix), so it is reasonable to assume that the original model is still preferred due to its superior interpretability.
+
+Another means of address a potential inequality of variances is via conducting a Levene test.
+
+```{r, echo=F,warning=F,error=F,message=F}
+res.abs=abs(model_main$residuals)
+model_levene <- aov(res.abs~g1classtype + g1schid,data=STAR)
+kable(cbind(tibble(` `= c("Class Type", "School ID", "Residuals")), as_tibble(summary(model_levene)[[1]]))) %>%
+  kable_styling(full_width = F) %>% 
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+This null hypothesis for this test is that the variances are equivalent across different cells of class type and school ID. By conducting the Levene test, it is possible conclude that this null hypothesis can be rejected at the significance level of \(\alpha = 0.05\) for the school ID variable--however, with over 70 different schools, it is reasonable to observe that at least two variances would differ between schools, and failing to reject at the more conservative \(\alpha = 0.01\) is sufficient evidence that there is no major departure from the assumption of equal variances. 
 
 ## Alternative Models
 
@@ -542,6 +559,8 @@ The STAR dataset contains two relevant variables that will be used in this secti
 1. "g8pmanoy", or the reporting of teachers on how often students annoy their classmates. If an interaction exists between this variable and the class size variable of interest, it may be reasonable to infer that consideration for sociability of students should be considered when estimating benefits of shrinking class sizes. It is important to not that these scores were collected 7 years after the timeframe of interest, however it is plausible that students might demonstrate similar levels of class disruption throughout this period of their lives. Also, note that there are only ~2100 the students with recorded annoyance scores who participated in STAR in 1st grade.
 
 2. "g1selfconcraw", or the SCAMIN self-concept scores that report a child's ability to actualize emotions and relationships. Again, if an interaction exists between this variable and the class size variable of interest, it may be reasonable to infer that a child's self-concept and social intelligence may dictate his or her marginal benefit from reduced class sizes. It is important to note that SCAMIN has been criticized for its lack of generalizability outside of middle-income and suburban students (Schanzenbach 2006).
+
+(Note: the "g8idattn" variable, which corresponds to the students self-reporting in 8th grade whether they "only get attention when they cause trouble" merits some level of consideration on social impact, but the phrasing of "causing trouble" is sufficiently general that it may depart from this issue of socialization. Consideration for this variable is given in the appendix, as results do not differ significantly from those associated with "g8pmanoy".)
 
 ```{r, echo=F,warning=F,error=F,message=F, fig.align = 'center',fig.width=10, fig.height=4}
 STAR_social <- STAR_df %>%
@@ -754,7 +773,7 @@ kable(cbind(tibble(` `= c("Class Type", "SCAMIN Improvement", "School ID", "Resi
 
 The inclusion of the improvement in self-concept has shockingly low explanatory value for mean math scores. This strongly indicates that a student's ability to progress self-concept between kindergarten and 1st grade has little bearing on their academic performance. This does reinforce the directionality of the previous model, as it becomes much more likely that classroom type affects self-concept development--instead, it is more likely that students with different self-concept scores possess varying ability to perform well on tests.
 
-Ultimately, the effect of socialization on academic performance is relatively unclear from this dataset. Future experimental design could provide more emphasis on measurable socialization of students as well as general social cohesion of the students in each classroom. While there is some evidence that students' sociability affects their math test scores, it is difficult to assign variability in the outcome variable to factors other than school ID and class type with a high level of statistical certainty.
+Ultimately, the effect of socialization on academic performance is relatively unclear from this dataset. Future experimental design could provide more emphasis on measurable socialization of students as well as general social cohesion of the students in each classroom. While there is some evidence that students' sociability affects their math test scores, it is difficult to assign variability in the outcome variable to factors other than school ID and class type with a high level of statistical certainty using the variables included in the STAR longitudinal survey. In other words, the main historical takeaway from the STAR experiment--i.e., that class size reduction leads to an increase in academic performance at the childhood level by increasing attention from the primary instructor--is thoroughly reinforced by the findings of this report via ANOVA methodology.
 
 
 
@@ -844,6 +863,38 @@ par(mfrow=c(1,1), mar = c(5,20,5,0))
 tuk_plot(tukey_test_90th,xlab = "Differences in 90th quantiles of class type",ylab = "", las=1 , col="brown")
 ```
 
+## g8idattn
+
+```{r, echo=F,warning=F,error=F,message=F}
+STAR_df_attn <- STAR_raw %>%
+  select(starts_with("gk") | starts_with("g1") |
+           c(g8idattn,stdntid,gender,race,
+             FLAGSGK,FLAGSG1,FLAGSG2,FLAGSG3,cmpstype,
+             cmpsdura,yearsstar,yearssmall,)) %>%
+  filter_all(any_vars(!is.na(.))) 
+
+STAR_attn <- STAR_df_attn %>% 
+  filter(!is.na(g1classtype)) %>%
+  mutate(g1schid = as.factor(g1schid)) %>%
+  group_by(g1tchid,g1classtype,g1schid,g1surban) %>%
+  summarize(math_mean_byteacher = mean(g1tmathss,na.rm=T),
+            math_med_byteacher = median(g1tmathss,na.rm=T),
+            math_10_byteacher = quantile(g1tmathss,.1,na.rm=T),
+            math_90_byteacher = quantile(g1tmathss,.9,na.rm=T),
+            mean_attention = mean(as.numeric(g8idattn),na.rm=T),
+            mean_scamin = mean(as.numeric(g1selfconcraw), na.rm = T),
+            imp_scamin = mean(as.numeric(g1selfconcraw) - as.numeric(gkselfconcraw), na.rm = T))
+
+# aov(math_mean_byteacher ~ g1classtype + mean_attention + g1schid, data= STAR_attn)$coef
+
+model_meanattn <- Anova(lm(math_mean_byteacher ~ g1classtype + mean_attention + g1schid, data= STAR_attn, type = "II"))
+kable(cbind(tibble(` `= c("Class Type", "Mean Attention-Seeking Score", "School ID", "Residuals")), as_tibble(model_meanattn))) %>%
+  kable_styling(full_width = F) %>%
+  kable_minimal(html_font = "Arial", bootstrap_options = "striped")
+```
+
+As with the results for the disruptiveness score measured by the variable g8pmanoy, it appears that disruptiveness as measured by the g8idattn variable is not significant at the 1% or even 5% significance level, although it does appear to be significant at $\alpha = 0.1$. The variable ranges in value from 1 to 4, with values of 1 suggesting a given student will "strongly agree" with the statement "I only get attention when I cause trouble", and 4 suggesting that they "strongly disagree". The coefficient on this variable is 6.10, which indicates that as individuals agree more that they seek attention, they tend to receive higher test scores. While these results are marginally more significant than those previously discussed for the related measure of annoyance/disruptiveness, the ambiguity of what "seeking attention" and "causing trouble" may mean prevent this variable from being an effective measure of social disruptiveness--hence its exclusion from the main discussion section.
+
 # Acknowledgement {-}
 
 I discussed this project with Thommas Phan.
@@ -854,7 +905,7 @@ Adler, P. A., & Adler, P. (1998). Peer power: Preadolescent culture and identity
 
 Achilles, C. M. (2012, September 30). Class-size policy: The Star Experiment and related class-size studies. NCPEA policy brief Volume 1, Number 2. NCPEA Publications. https://eric.ed.gov/?id=ED540485 
 
-Achilles, C.M.; Helen Pate Bain; Fred Bellott; Jayne Boyd-Zaharias; Jeremy Finn; John Folger; John Johnston; Elizabeth Word, (2008). Tennessee's Student Teacher Achievement Ratio (STAR) project. https://doi.org/10.7910/DVN/SIWH9F, Harvard Dataverse, V1, UNF:3:Ji2Q+9HCCZAbw3csOdMNdA== [fileUNF] 
+Achilles, C.M., Bain, Helen Pate et al. (2008). Tennessee's Student Teacher Achievement Ratio (STAR) project. https://doi.org/10.7910/DVN/SIWH9F, Harvard Dataverse, V1, UNF:3:Ji2Q+9HCCZAbw3csOdMNdA== [fileUNF] 
 
 Liu, CY., Huang, WL., Kao, WC. et al. (2017). Influence of Disruptive Behavior Disorders on Academic Performance and School Functions of Youths with Attention-Deficit/Hyperactivity Disorder. Child Psychiatry Hum Dev 48, 870–880 . https://doi.org/10.1007/s10578-017-0710-7
 
